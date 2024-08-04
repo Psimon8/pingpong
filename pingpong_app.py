@@ -90,8 +90,7 @@ def get_user_stats(username):
     total_matches, wins = result
     losses = total_matches - wins
     win_rate = (wins / total_matches) * 100 if total_matches > 0 else 0
-    loss_rate = 100 - win_rate
-    return total_matches, win_rate, loss_rate
+    return total_matches, wins, win_rate
 
 # Fonction pour récupérer l'historique Elo
 def get_elo_history(username):
@@ -113,42 +112,58 @@ def get_elo_history(username):
     return df.sort_values('datetime')
 
 def show_performance_view():
-    col1, col2 = st.columns(2)
+    st.subheader("Classement général")
+    
+    # Récupérer les données pour tous les joueurs
+    c.execute("SELECT username, elo FROM users ORDER BY elo DESC")
+    users_data = c.fetchall()
+    
+    # Préparer les données pour le tableau
+    ranking_data = []
+    for username, elo in users_data:
+        total_matches, wins, win_rate = get_user_stats(username)
+        ranking_data.append({
+            "Joueur": username,
+            "ELO": elo,
+            "Nombre de matchs": total_matches,
+            "% de victoire": f"{win_rate:.1f}%"
+        })
+    
+    # Créer et afficher le DataFrame
+    ranking_df = pd.DataFrame(ranking_data)
+    st.dataframe(ranking_df.style.format({"ELO": "{:.0f}", "% de victoire": "{:.1f}%"}))
 
-    with col1:
-        st.subheader("Classement général")
-        ranking = c.execute("SELECT username, elo FROM users ORDER BY elo DESC").fetchall()
-        ranking_df = pd.DataFrame(ranking, columns=['Joueur', 'ELO'])
-        st.dataframe(ranking_df)
+    st.markdown("---")
 
-    with col2:
-        st.subheader("Statistiques du joueur")
-        users = [user[0] for user in c.execute("SELECT username FROM users").fetchall()]
-        selected_user = st.selectbox("Sélectionner un joueur", users, index=users.index(st.session_state.user))
+    st.subheader("Statistiques du joueur")
+    users = [user[0] for user in users_data]
+    selected_user = st.selectbox("Sélectionner un joueur", users, index=users.index(st.session_state.user))
 
-        total_matches, win_rate, loss_rate = get_user_stats(selected_user)
-        st.write(f"Nombre total de matchs : {total_matches}")
+    total_matches, wins, win_rate = get_user_stats(selected_user)
+    st.write(f"Nombre total de matchs : {total_matches}")
+    st.write(f"Nombre de victoires : {wins}")
+    st.write(f"Taux de victoire : {win_rate:.1f}%")
 
-        # Graphique des victoires/défaites
-        fig_pie = px.pie(
-            values=[win_rate, loss_rate],
-            names=['Victoires', 'Défaites'],
-            title=f"Taux de victoire/défaite de {selected_user}"
+    # Graphique des victoires/défaites
+    fig_pie = px.pie(
+        values=[win_rate, 100-win_rate],
+        names=['Victoires', 'Défaites'],
+        title=f"Taux de victoire/défaite de {selected_user}"
+    )
+    st.plotly_chart(fig_pie)
+
+    # Graphique de l'évolution de l'ELO
+    elo_history = get_elo_history(selected_user)
+    if not elo_history.empty:
+        fig_line = px.line(
+            elo_history, 
+            x='datetime', 
+            y='elo',
+            title=f"Évolution de l'ELO de {selected_user} (10 derniers matchs)"
         )
-        st.plotly_chart(fig_pie)
-
-        # Graphique de l'évolution de l'ELO
-        elo_history = get_elo_history(selected_user)
-        if not elo_history.empty:
-            fig_line = px.line(
-                elo_history, 
-                x='datetime', 
-                y='elo',
-                title=f"Évolution de l'ELO de {selected_user} (10 derniers matchs)"
-            )
-            st.plotly_chart(fig_line)
-        else:
-            st.write("Pas assez de données pour afficher l'évolution de l'ELO.")
+        st.plotly_chart(fig_line)
+    else:
+        st.write("Pas assez de données pour afficher l'évolution de l'ELO.")
 
 def show_add_match_view():
     st.subheader("Ajouter un match")
