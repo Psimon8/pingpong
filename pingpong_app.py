@@ -2,6 +2,9 @@ import streamlit as st
 import sqlite3
 import hashlib
 import math
+import pandas as pd
+import plotly.express as px
+from datetime import datetime
 
 # Connexion à la base de données
 conn = sqlite3.connect('pingpong.db')
@@ -11,7 +14,14 @@ c = conn.cursor()
 c.execute('''CREATE TABLE IF NOT EXISTS users
              (id INTEGER PRIMARY KEY, username TEXT UNIQUE, password TEXT, elo INTEGER)''')
 c.execute('''CREATE TABLE IF NOT EXISTS matches
-             (id INTEGER PRIMARY KEY, player1 INTEGER, player2 INTEGER, score1 INTEGER, score2 INTEGER)''')
+             (id INTEGER PRIMARY KEY, 
+              player1 TEXT, 
+              player2 TEXT, 
+              score1 INTEGER, 
+              score2 INTEGER, 
+              new_elo1 INTEGER,
+              new_elo2 INTEGER,
+              datetime TEXT)''')
 conn.commit()
 
 # Fonction pour calculer le nouveau classement Elo
@@ -57,9 +67,47 @@ def add_match(player1, player2, score1, score2):
     
     c.execute("UPDATE users SET elo=? WHERE username=?", (new_rating1, player1))
     c.execute("UPDATE users SET elo=? WHERE username=?", (new_rating2, player2))
-    c.execute("INSERT INTO matches (player1, player2, score1, score2) VALUES (?, ?, ?, ?)",
-              (player1, player2, score1, score2))
+    c.execute("INSERT INTO matches (player1, player2, score1, score2, new_elo1, new_elo2, datetime) VALUES (?, ?, ?, ?, ?, ?, ?)",
+              (player1, player2, score1, score2, new_rating1, new_rating2, datetime.now().isoformat()))
     conn.commit()
+
+# Fonction pour récupérer les statistiques de l'utilisateur
+def get_user_stats(username):
+    c.execute("""
+        SELECT 
+            COUNT(*) as total_matches,
+            SUM(CASE WHEN 
+                (player1 = ? AND score1 > score2) OR 
+                (player2 = ? AND score2 > score1) 
+            THEN 1 ELSE 0 END) as wins
+        FROM matches
+        WHERE player1 = ? OR player2 = ?
+    """, (username, username, username, username))
+    result = c.fetchone()
+    total_matches, wins = result
+    losses = total_matches - wins
+    win_rate = (wins / total_matches) * 100 if total_matches > 0 else 0
+    loss_rate = 100 - win_rate
+    return total_matches, win_rate, loss_rate
+
+# Fonction pour récupérer l'historique Elo
+def get_elo_history(username):
+    c.execute("""
+        SELECT 
+            CASE 
+                WHEN player1 = ? THEN new_elo1
+                WHEN player2 = ? THEN new_elo2
+            END as elo,
+            datetime
+        FROM matches
+        WHERE player1 = ? OR player2 = ?
+        ORDER BY datetime DESC
+        LIMIT 10
+    """, (username, username, username, username))
+    results = c.fetchall()
+    df = pd.DataFrame(results, columns=['elo', 'datetime'])
+    df['datetime'] = pd.to_datetime(df['datetime'])
+    return df.sort_values('datetime')
 
 # Interface utilisateur Streamlit
 def main():
@@ -101,19 +149,52 @@ def main():
             st.session_state.user = None
             st.experimental_rerun()
 
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.subheader("Classement général")
+            ranking = c.execute("SELECT username, elo FROM users ORDER BY elo DESC").fetchall()
+            ranking_df = pd.DataFrame(ranking, columns=['Joueur', 'ELO'])
+            st.dataframe(ranking_df)
+
+        with col2:
+            st.subheader("Statistiques du joueur")
+            users = [user[0] for user in c.execute("SELECT username FROM users").fetchall()]
+            selected_user = st.selectbox("Sélectionner un joueur", users, index=users.index(st.session_state.user))
+
+            total_matches, win_rate, loss_rate = get_user_stats(selected_user)
+            st.write(f"Nombre total de matchs : {total_matches}")
+
+            # Graphique des victoires/défaites
+            fig_pie = px.pie(
+                values=[win_rate, loss_rate],
+                names=['Victoires', 'Défaites'],
+                title=f"Taux de victoire/défaite de {selected_user}"
+            )
+            st.plotly_chart(fig_pie)
+
+            # Graphique de l'évolution de l'ELO
+            elo_history = get_elo_history(selected_user)
+            if not elo_history.empty:
+                fig_line = px.line(
+                    elo_history, 
+                    x='datetime', 
+                    y='elo',
+                    title=f"Évolution de l'ELO de {selected_user} (10 derniers matchs)"
+                )
+                st.plotly_chart(fig_line)
+            else:
+                st.write("Pas assez de données pour afficher l'évolution de l'ELO.")
+
         st.subheader("Ajouter un match")
-        player1 = st.selectbox("Joueur 1", [user[0] for user in c.execute("SELECT username FROM users").fetchall()])
-        player2 = st.selectbox("Joueur 2", [user[0] for user in c.execute("SELECT username FROM users").fetchall() if user[0] != player1])
+        player1 = st.selectbox("Joueur 1", users)
+        player2 = st.selectbox("Joueur 2", [u for u in users if u != player1])
         score1 = st.number_input("Score Joueur 1", min_value=0, step=1)
         score2 = st.number_input("Score Joueur 2", min_value=0, step=1)
         if st.button("Enregistrer le match"):
             add_match(player1, player2, score1, score2)
             st.success("Match enregistré et classements mis à jour")
-
-        st.subheader("Classement actuel")
-        ranking = c.execute("SELECT username, elo FROM users ORDER BY elo DESC").fetchall()
-        for i, (player, elo) in enumerate(ranking, 1):
-            st.write(f"{i}. {player}: {elo}")
+            st.experimental_rerun()
 
 if __name__ == "__main__":
     main()
