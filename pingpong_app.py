@@ -29,7 +29,7 @@ def calculate_elo(rating1, rating2, score1, score2):
     expected1 = 1 / (1 + math.pow(10, (rating2 - rating1) / 400))
     expected2 = 1 / (1 + math.pow(10, (rating1 - rating2) / 400))
     
-    result1 = 1 if score1 > score2 else (0.5 if score1 == score2 else 0)
+    result1 = 1 if score1 > score2 else 0
     result2 = 1 - result1
     
     k = 32
@@ -57,11 +57,14 @@ def create_user(username, password):
         return False
 
 # Fonction pour ajouter un match
-def add_match(player1, player2, score1, score2):
+def add_match(player1, player2, winner):
     c.execute("SELECT elo FROM users WHERE username=?", (player1,))
     rating1 = c.fetchone()[0]
     c.execute("SELECT elo FROM users WHERE username=?", (player2,))
     rating2 = c.fetchone()[0]
+    
+    score1 = 1 if winner == player1 else 0
+    score2 = 1 - score1
     
     new_rating1, new_rating2 = calculate_elo(rating1, rating2, score1, score2)
     
@@ -150,13 +153,29 @@ def show_performance_view():
 def show_add_match_view():
     st.subheader("Ajouter un match")
     users = [user[0] for user in c.execute("SELECT username FROM users").fetchall()]
-    player1 = st.selectbox("Joueur 1", users)
-    player2 = st.selectbox("Joueur 2", [u for u in users if u != player1])
-    score1 = st.number_input("Score Joueur 1", min_value=0, step=1)
-    score2 = st.number_input("Score Joueur 2", min_value=0, step=1)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        player1 = st.selectbox("Joueur 1", users)
+    with col2:
+        player1_result = st.radio("Résultat Joueur 1", ["Victoire", "Défaite"], horizontal=True)
+    
+    st.markdown("---")
+    
+    col3, col4 = st.columns(2)
+    
+    with col3:
+        player2 = st.selectbox("Joueur 2", [u for u in users if u != player1])
+    with col4:
+        player2_result = "Défaite" if player1_result == "Victoire" else "Victoire"
+        st.write(f"Résultat Joueur 2: {player2_result}")
+    
     if st.button("Enregistrer le match"):
-        add_match(player1, player2, score1, score2)
+        winner = player1 if player1_result == "Victoire" else player2
+        add_match(player1, player2, winner)
         st.success("Match enregistré et classements mis à jour")
+        st.session_state.menu_choice = "Performances"
         st.experimental_rerun()
 
 # Interface utilisateur Streamlit
@@ -165,6 +184,9 @@ def main():
 
     if 'user' not in st.session_state:
         st.session_state.user = None
+    
+    if 'menu_choice' not in st.session_state:
+        st.session_state.menu_choice = "Performances"
 
     if st.session_state.user is None:
         st.subheader("Connexion / Création de compte")
@@ -197,16 +219,16 @@ def main():
         st.sidebar.title(f"Bienvenue, {st.session_state.user}")
         
         # Menu dans la barre latérale
-        menu_choice = st.sidebar.radio("Menu", ["Performances", "Ajouter un match"])
+        st.session_state.menu_choice = st.sidebar.radio("Menu", ["Performances", "Ajouter un match"])
         
         if st.sidebar.button("Se déconnecter"):
             st.session_state.user = None
             st.experimental_rerun()
 
         # Affichage de la vue correspondante
-        if menu_choice == "Performances":
+        if st.session_state.menu_choice == "Performances":
             show_performance_view()
-        elif menu_choice == "Ajouter un match":
+        elif st.session_state.menu_choice == "Ajouter un match":
             show_add_match_view()
 
 if __name__ == "__main__":
