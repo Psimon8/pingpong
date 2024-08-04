@@ -109,6 +109,56 @@ def get_elo_history(username):
     df['datetime'] = pd.to_datetime(df['datetime'])
     return df.sort_values('datetime')
 
+def show_performance_view():
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("Classement général")
+        ranking = c.execute("SELECT username, elo FROM users ORDER BY elo DESC").fetchall()
+        ranking_df = pd.DataFrame(ranking, columns=['Joueur', 'ELO'])
+        st.dataframe(ranking_df)
+
+    with col2:
+        st.subheader("Statistiques du joueur")
+        users = [user[0] for user in c.execute("SELECT username FROM users").fetchall()]
+        selected_user = st.selectbox("Sélectionner un joueur", users, index=users.index(st.session_state.user))
+
+        total_matches, win_rate, loss_rate = get_user_stats(selected_user)
+        st.write(f"Nombre total de matchs : {total_matches}")
+
+        # Graphique des victoires/défaites
+        fig_pie = px.pie(
+            values=[win_rate, loss_rate],
+            names=['Victoires', 'Défaites'],
+            title=f"Taux de victoire/défaite de {selected_user}"
+        )
+        st.plotly_chart(fig_pie)
+
+        # Graphique de l'évolution de l'ELO
+        elo_history = get_elo_history(selected_user)
+        if not elo_history.empty:
+            fig_line = px.line(
+                elo_history, 
+                x='datetime', 
+                y='elo',
+                title=f"Évolution de l'ELO de {selected_user} (10 derniers matchs)"
+            )
+            st.plotly_chart(fig_line)
+        else:
+            st.write("Pas assez de données pour afficher l'évolution de l'ELO.")
+
+def show_add_match_view():
+    st.subheader("Ajouter un match")
+    users = [user[0] for user in c.execute("SELECT username FROM users").fetchall()]
+    player1 = st.selectbox("Joueur 1", users)
+    player2 = st.selectbox("Joueur 2", [u for u in users if u != player1])
+    score1 = st.number_input("Score Joueur 1", min_value=0, step=1)
+    score2 = st.number_input("Score Joueur 2", min_value=0, step=1)
+    if st.button("Enregistrer le match"):
+        add_match(player1, player2, score1, score2)
+        st.success("Match enregistré et classements mis à jour")
+        st.experimental_rerun()
+
 # Interface utilisateur Streamlit
 def main():
     st.title("Application de classement Ping-Pong")
@@ -145,56 +195,19 @@ def main():
 
     else:
         st.sidebar.title(f"Bienvenue, {st.session_state.user}")
+        
+        # Menu dans la barre latérale
+        menu_choice = st.sidebar.radio("Menu", ["Performances", "Ajouter un match"])
+        
         if st.sidebar.button("Se déconnecter"):
             st.session_state.user = None
             st.experimental_rerun()
 
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.subheader("Classement général")
-            ranking = c.execute("SELECT username, elo FROM users ORDER BY elo DESC").fetchall()
-            ranking_df = pd.DataFrame(ranking, columns=['Joueur', 'ELO'])
-            st.dataframe(ranking_df)
-
-        with col2:
-            st.subheader("Statistiques du joueur")
-            users = [user[0] for user in c.execute("SELECT username FROM users").fetchall()]
-            selected_user = st.selectbox("Sélectionner un joueur", users, index=users.index(st.session_state.user))
-
-            total_matches, win_rate, loss_rate = get_user_stats(selected_user)
-            st.write(f"Nombre total de matchs : {total_matches}")
-
-            # Graphique des victoires/défaites
-            fig_pie = px.pie(
-                values=[win_rate, loss_rate],
-                names=['Victoires', 'Défaites'],
-                title=f"Taux de victoire/défaite de {selected_user}"
-            )
-            st.plotly_chart(fig_pie)
-
-            # Graphique de l'évolution de l'ELO
-            elo_history = get_elo_history(selected_user)
-            if not elo_history.empty:
-                fig_line = px.line(
-                    elo_history, 
-                    x='datetime', 
-                    y='elo',
-                    title=f"Évolution de l'ELO de {selected_user} (10 derniers matchs)"
-                )
-                st.plotly_chart(fig_line)
-            else:
-                st.write("Pas assez de données pour afficher l'évolution de l'ELO.")
-
-        st.subheader("Ajouter un match")
-        player1 = st.selectbox("Joueur 1", users)
-        player2 = st.selectbox("Joueur 2", [u for u in users if u != player1])
-        score1 = st.number_input("Score Joueur 1", min_value=0, step=1)
-        score2 = st.number_input("Score Joueur 2", min_value=0, step=1)
-        if st.button("Enregistrer le match"):
-            add_match(player1, player2, score1, score2)
-            st.success("Match enregistré et classements mis à jour")
-            st.experimental_rerun()
+        # Affichage de la vue correspondante
+        if menu_choice == "Performances":
+            show_performance_view()
+        elif menu_choice == "Ajouter un match":
+            show_add_match_view()
 
 if __name__ == "__main__":
     main()
