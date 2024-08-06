@@ -5,6 +5,7 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime
 import sqlite3
+import os
 
 st.set_page_config(
     layout="wide",
@@ -12,8 +13,12 @@ st.set_page_config(
     page_icon="🏓"
 )
 
+# Ensure the directory for the database file exists
+os.makedirs("database", exist_ok=True)
+
 # SQLite database connection
-conn = sqlite3.connect('pingpong.db')
+db_path = os.path.join("database", "pingpong.db")
+conn = sqlite3.connect(db_path)
 c = conn.cursor()
 
 # Create tables if they don't exist
