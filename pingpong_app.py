@@ -6,6 +6,7 @@ import plotly.express as px
 from datetime import datetime
 import sqlite3
 import json
+import os
 
 st.set_page_config(
     layout="wide",
@@ -15,6 +16,9 @@ st.set_page_config(
 
 # File path for user data
 USERS_FILE_PATH = 'pingpong/users.json'
+
+# Ensure the directory exists
+os.makedirs(os.path.dirname(USERS_FILE_PATH), exist_ok=True)
 
 # SQLite database connection
 conn = sqlite3.connect('pingpong.db')
@@ -34,11 +38,10 @@ conn.commit()
 
 # Load user data from JSON file
 def load_users():
-    try:
-        with open(USERS_FILE_PATH, 'r') as file:
-            return json.load(file)
-    except FileNotFoundError:
+    if not os.path.exists(USERS_FILE_PATH):
         return []
+    with open(USERS_FILE_PATH, 'r') as file:
+        return json.load(file)
 
 # Save user data to JSON file
 def save_users(users):
