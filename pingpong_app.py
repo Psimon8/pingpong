@@ -41,14 +41,12 @@ conn.commit()
 
 # Load user data from JSON file
 def load_users():
-    st.write("Loading users from JSON file.")
     if not os.path.exists(USERS_FILE_PATH):
         st.write("Users file does not exist. Returning empty list.")
         return []
     try:
         with open(USERS_FILE_PATH, 'r') as file:
             users = json.load(file)
-            st.write("Users loaded successfully.")
             return users
     except Exception as e:
         st.error(f"Error loading users: {e}")
