@@ -45,8 +45,12 @@ def load_users():
 
 # Save user data to JSON file
 def save_users(users):
-    with open(USERS_FILE_PATH, 'w') as file:
-        json.dump(users, file)
+    try:
+        with open(USERS_FILE_PATH, 'w') as file:
+            json.dump(users, file)
+        st.write("Users saved successfully.")
+    except Exception as e:
+        st.error(f"Error saving users: {e}")
 
 users = load_users()
 
