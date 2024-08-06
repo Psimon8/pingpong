@@ -205,7 +205,7 @@ def show_database_view():
         st.write("No match data available.")
 
 def main():
-    st.title("Application de classement Ping-Pong")
+    st.title("PrimeliPong 🏓")
     if 'user' not in st.session_state:
         st.session_state.user = None
     if 'menu_choice' not in st.session_state:
