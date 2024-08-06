@@ -117,9 +117,12 @@ def add_match(player1, player2, winner):
     conn.commit()
     save_users(users)
 
-def delete_match(match_id):
-    c.execute("DELETE FROM matches WHERE id=?", (match_id,))
-    conn.commit()
+def delete_last_match():
+    c.execute("SELECT id FROM matches ORDER BY datetime DESC LIMIT 1")
+    last_match = c.fetchone()
+    if last_match:
+        c.execute("DELETE FROM matches WHERE id=?", (last_match[0],))
+        conn.commit()
 
 def get_user_stats(username):
     c.execute("""
@@ -202,17 +205,15 @@ def show_add_match_view():
 def show_database_view():
     st.subheader("Visualiser la base de données SQLite")
     # Query all matches from the database
-    c.execute("SELECT * FROM matches")
+    c.execute("SELECT * FROM matches ORDER BY datetime DESC")
     matches = c.fetchall()
     if matches:
         df = pd.DataFrame(matches, columns=['ID', 'Player1', 'Player2', 'Score1', 'Score2', 'New_Elo1', 'New_Elo2', 'Datetime'])
         st.dataframe(df)
         
-        # Add delete buttons
-        for index, row in df.iterrows():
-            if st.button(f"Supprimer le match {row['ID']}", key=row['ID']):
-                delete_match(row['ID'])
-                st.experimental_rerun()
+        if st.button("Supprimer le dernier match"):
+            delete_last_match()
+            st.experimental_rerun()
     else:
         st.write("No match data available.")
 
