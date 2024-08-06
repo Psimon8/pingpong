@@ -1,10 +1,11 @@
 import streamlit as st
-import sqlite3
 import hashlib
 import math
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
+import sqlite3
+import json
 
 st.set_page_config(
     layout="wide",
@@ -12,13 +13,14 @@ st.set_page_config(
     page_icon="🏓"
 )
 
+# File path for user data
+USERS_FILE_PATH = 'pingpong/users.json'
+
 # SQLite database connection
 conn = sqlite3.connect('pingpong.db')
 c = conn.cursor()
 
 # Create tables if they don't exist
-c.execute('''CREATE TABLE IF NOT EXISTS users
-             (id INTEGER PRIMARY KEY, username TEXT UNIQUE, password TEXT, elo INTEGER)''')
 c.execute('''CREATE TABLE IF NOT EXISTS matches
              (id INTEGER PRIMARY KEY, 
               player1 TEXT, 
@@ -29,6 +31,21 @@ c.execute('''CREATE TABLE IF NOT EXISTS matches
               new_elo2 INTEGER,
               datetime TEXT)''')
 conn.commit()
+
+# Load user data from JSON file
+def load_users():
+    try:
+        with open(USERS_FILE_PATH, 'r') as file:
+            return json.load(file)
+    except FileNotFoundError:
+        return []
+
+# Save user data to JSON file
+def save_users(users):
+    with open(USERS_FILE_PATH, 'w') as file:
+        json.dump(users, file)
+
+users = load_users()
 
 def calculate_elo(rating1, rating2, score1, score2):
     expected1 = 1 / (1 + math.pow(10, (rating2 - rating1) / 400))
@@ -44,33 +61,42 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def check_credentials(username, password):
-    c.execute("SELECT * FROM users WHERE username=? AND password=?", (username, hash_password(password)))
-    return c.fetchone() is not None
+    hashed_password = hash_password(password)
+    st.write(f"Checking credentials for {username} with hashed password {hashed_password}")
+    return any(user['username'] == username and user['password'] == hashed_password for user in users)
 
 def create_user(username, password):
-    try:
-        c.execute("INSERT INTO users (username, password, elo) VALUES (?, ?, 1500)", (username, hash_password(password)))
-        conn.commit()
-        return True
-    except sqlite3.IntegrityError:
+    if any(user['username'] == username for user in users):
         return False
+    new_user = {'username': username, 'password': hash_password(password), 'elo': 1500}
+    users.append(new_user)
+    save_users(users)
+    st.write(f"Created user {username} with hashed password {new_user['password']}")
+    return True
 
 def add_match(player1, player2, winner):
-    c.execute("SELECT elo FROM users WHERE username=?", (player1,))
-    rating1 = c.fetchone()[0]
-    c.execute("SELECT elo FROM users WHERE username=?", (player2,))
-    rating2 = c.fetchone()[0]
-    
+    player1_data = next(user for user in users if user['username'] == player1)
+    player2_data = next(user for user in users if user['username'] == player2)
+    rating1 = player1_data['elo']
+    rating2 = player2_data['elo']
     score1 = 1 if winner == player1 else 0
     score2 = 1 - score1
-    
     new_rating1, new_rating2 = calculate_elo(rating1, rating2, score1, score2)
-    
-    c.execute("UPDATE users SET elo=? WHERE username=?", (new_rating1, player1))
-    c.execute("UPDATE users SET elo=? WHERE username=?", (new_rating2, player2))
+    player1_data['elo'] = new_rating1
+    player2_data['elo'] = new_rating2
+    new_match = {
+        'player1': player1,
+        'player2': player2,
+        'score1': score1,
+        'score2': score2,
+        'new_elo1': new_rating1,
+        'new_elo2': new_rating2,
+        'datetime': datetime.now().isoformat()
+    }
     c.execute("INSERT INTO matches (player1, player2, score1, score2, new_elo1, new_elo2, datetime) VALUES (?, ?, ?, ?, ?, ?, ?)",
-              (player1, player2, score1, score2, new_rating1, new_rating2, datetime.now().isoformat()))
+              (player1, player2, score1, score2, new_rating1, new_rating2, new_match['datetime']))
     conn.commit()
+    save_users(users)
 
 def get_user_stats(username):
     c.execute("""
@@ -112,13 +138,11 @@ def show_performance_view():
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Classement général")
-        ranking = c.execute("SELECT username, elo FROM users ORDER BY elo DESC").fetchall()
-        ranking_df = pd.DataFrame(ranking, columns=['Joueur', 'ELO'])
+        ranking_df = pd.DataFrame(users, columns=['username', 'elo']).sort_values(by='elo', ascending=False)
         st.dataframe(ranking_df)
     with col2:
         st.subheader("Statistiques du joueur")
-        users = [user[0] for user in c.execute("SELECT username FROM users").fetchall()]
-        selected_user = st.selectbox("Sélectionner un joueur", users, index=0)
+        selected_user = st.selectbox("Sélectionner un joueur", [user['username'] for user in users], index=0)
         total_matches, win_rate, loss_rate = get_user_stats(selected_user)
         st.write(f"Nombre total de matchs : {total_matches}")
         fig_pie = px.pie(values=[win_rate, loss_rate], names=['Victoires', 'Défaites'], title=f"Taux de victoire/défaite de {selected_user}")
@@ -132,16 +156,16 @@ def show_performance_view():
 
 def show_add_match_view():
     st.subheader("Ajouter un match")
-    users = [user[0] for user in c.execute("SELECT username FROM users").fetchall()]
+    users_list = [user['username'] for user in users]
     col1, col2 = st.columns(2)
     with col1:
-        player1 = st.selectbox("Joueur 1", users)
+        player1 = st.selectbox("Joueur 1", users_list)
     with col2:
         player1_result = st.radio("Résultat Joueur 1", ["Victoire", "Défaite"], horizontal=True)
     st.markdown("---")
     col3, col4 = st.columns(2)
     with col3:
-        player2 = st.selectbox("Joueur 2", [u for u in users if u != player1])
+        player2 = st.selectbox("Joueur 2", [u for u in users_list if u != player1])
     with col4:
         player2_result = "Défaite" if player1_result == "Victoire" else "Victoire"
         st.write(f"Résultat Joueur 2: {player2_result}")
