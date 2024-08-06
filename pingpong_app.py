@@ -18,7 +18,10 @@ st.set_page_config(
 USERS_FILE_PATH = 'pingpong/users.json'
 
 # Ensure the directory exists
-os.makedirs(os.path.dirname(USERS_FILE_PATH), exist_ok=True)
+try:
+    os.makedirs(os.path.dirname(USERS_FILE_PATH), exist_ok=True)
+except Exception as e:
+    st.error(f"Error creating directory: {e}")
 
 # SQLite database connection
 conn = sqlite3.connect('pingpong.db')
@@ -38,10 +41,18 @@ conn.commit()
 
 # Load user data from JSON file
 def load_users():
+    st.write("Loading users from JSON file.")
     if not os.path.exists(USERS_FILE_PATH):
+        st.write("Users file does not exist. Returning empty list.")
         return []
-    with open(USERS_FILE_PATH, 'r') as file:
-        return json.load(file)
+    try:
+        with open(USERS_FILE_PATH, 'r') as file:
+            users = json.load(file)
+            st.write("Users loaded successfully.")
+            return users
+    except Exception as e:
+        st.error(f"Error loading users: {e}")
+        return []
 
 # Save user data to JSON file
 def save_users(users):
@@ -184,6 +195,17 @@ def show_add_match_view():
         st.session_state.menu_choice = "Performances"
         st.experimental_rerun()
 
+def show_database_view():
+    st.subheader("Visualiser la base de données SQLite")
+    # Query all matches from the database
+    c.execute("SELECT * FROM matches")
+    matches = c.fetchall()
+    if matches:
+        df = pd.DataFrame(matches, columns=['ID', 'Player1', 'Player2', 'Score1', 'Score2', 'New_Elo1', 'New_Elo2', 'Datetime'])
+        st.dataframe(df)
+    else:
+        st.write("No match data available.")
+
 def main():
     st.title("Application de classement Ping-Pong")
     if 'user' not in st.session_state:
@@ -214,7 +236,7 @@ def main():
                     st.error("Identifiants incorrects")
     else:
         st.sidebar.title(f"Bienvenue, {st.session_state.user}")
-        st.session_state.menu_choice = st.sidebar.radio("Menu", ["Performances", "Ajouter un match"])
+        st.session_state.menu_choice = st.sidebar.radio("Menu", ["Performances", "Ajouter un match", "Visualiser la base de données"])
         if st.sidebar.button("Se déconnecter"):
             st.session_state.user = None
             st.experimental_rerun()
@@ -222,6 +244,8 @@ def main():
             show_performance_view()
         elif st.session_state.menu_choice == "Ajouter un match":
             show_add_match_view()
+        elif st.session_state.menu_choice == "Visualiser la base de données":
+            show_database_view()
 
 if __name__ == "__main__":
     main()
