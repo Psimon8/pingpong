@@ -41,12 +41,14 @@ conn.commit()
 
 # Load user data from JSON file
 def load_users():
+    st.write("Loading users from JSON file.")
     if not os.path.exists(USERS_FILE_PATH):
         st.write("Users file does not exist. Returning empty list.")
         return []
     try:
         with open(USERS_FILE_PATH, 'r') as file:
             users = json.load(file)
+            st.write("Users loaded successfully.")
             return users
     except Exception as e:
         st.error(f"Error loading users: {e}")
@@ -114,6 +116,10 @@ def add_match(player1, player2, winner):
               (player1, player2, score1, score2, new_rating1, new_rating2, new_match['datetime']))
     conn.commit()
     save_users(users)
+
+def delete_match(match_id):
+    c.execute("DELETE FROM matches WHERE id=?", (match_id,))
+    conn.commit()
 
 def get_user_stats(username):
     c.execute("""
@@ -201,11 +207,17 @@ def show_database_view():
     if matches:
         df = pd.DataFrame(matches, columns=['ID', 'Player1', 'Player2', 'Score1', 'Score2', 'New_Elo1', 'New_Elo2', 'Datetime'])
         st.dataframe(df)
+        
+        # Add delete buttons
+        for index, row in df.iterrows():
+            if st.button(f"Supprimer le match {row['ID']}", key=row['ID']):
+                delete_match(row['ID'])
+                st.experimental_rerun()
     else:
         st.write("No match data available.")
 
 def main():
-    st.title("PrimeliPong 🏓")
+    st.title("Application de classement Ping-Pong")
     if 'user' not in st.session_state:
         st.session_state.user = None
     if 'menu_choice' not in st.session_state:
