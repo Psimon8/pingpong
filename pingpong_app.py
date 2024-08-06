@@ -1,12 +1,10 @@
 import streamlit as st
+import sqlite3
 import hashlib
 import math
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
-import requests
-import json
-import base64
 
 st.set_page_config(
     layout="wide",
@@ -14,59 +12,23 @@ st.set_page_config(
     page_icon="🏓"
 )
 
-# GitHub configuration
-GITHUB_TOKEN = "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"
-GITHUB_REPO = "Psimon8/pingpong"
-USERS_FILE_PATH = "users.json"
-MATCHES_FILE_PATH = "matches.json"
+# SQLite database connection
+conn = sqlite3.connect('pingpong.db')
+c = conn.cursor()
 
-def commit_to_github(file_path, content, message):
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
-    headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-    get_response = requests.get(url, headers=headers)
-    if get_response.status_code == 200:
-        sha = get_response.json()['sha']
-    else:
-        sha = None
-
-    data = {
-        "message": message,
-        "content": base64.b64encode(content.encode()).decode(),
-        "sha": sha
-    }
-    response = requests.put(url, headers=headers, data=json.dumps(data))
-    if response.status_code in [201, 200]:
-        return True
-    else:
-        st.error(f"Failed to commit to GitHub: {response.json()}")
-        return False
-
-def read_from_github(file_path):
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
-    headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        content = base64.b64decode(response.json()['content']).decode()
-        return json.loads(content)
-    else:
-        return []
-
-# Read data from GitHub
-users = read_from_github(USERS_FILE_PATH)
-matches = read_from_github(MATCHES_FILE_PATH)
-
-# Save data to GitHub
-def save_users_to_github(users):
-    commit_to_github(USERS_FILE_PATH, json.dumps(users), "Update users")
-
-def save_matches_to_github(matches):
-    commit_to_github(MATCHES_FILE_PATH, json.dumps(matches), "Update matches")
+# Create tables if they don't exist
+c.execute('''CREATE TABLE IF NOT EXISTS users
+             (id INTEGER PRIMARY KEY, username TEXT UNIQUE, password TEXT, elo INTEGER)''')
+c.execute('''CREATE TABLE IF NOT EXISTS matches
+             (id INTEGER PRIMARY KEY, 
+              player1 TEXT, 
+              player2 TEXT, 
+              score1 INTEGER, 
+              score2 INTEGER, 
+              new_elo1 INTEGER,
+              new_elo2 INTEGER,
+              datetime TEXT)''')
+conn.commit()
 
 def calculate_elo(rating1, rating2, score1, score2):
     expected1 = 1 / (1 + math.pow(10, (rating2 - rating1) / 400))
@@ -82,54 +44,67 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def check_credentials(username, password):
-    hashed_password = hash_password(password)
-    st.write(f"Checking credentials for {username} with hashed password {hashed_password}")
-    return any(user['username'] == username and user['password'] == hashed_password for user in users)
+    c.execute("SELECT * FROM users WHERE username=? AND password=?", (username, hash_password(password)))
+    return c.fetchone() is not None
 
 def create_user(username, password):
-    if any(user['username'] == username for user in users):
+    try:
+        c.execute("INSERT INTO users (username, password, elo) VALUES (?, ?, 1500)", (username, hash_password(password)))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
         return False
-    new_user = {'username': username, 'password': hash_password(password), 'elo': 1500}
-    users.append(new_user)
-    save_users_to_github(users)
-    st.write(f"Created user {username} with hashed password {new_user['password']}")
-    return True
 
 def add_match(player1, player2, winner):
-    player1_data = next(user for user in users if user['username'] == player1)
-    player2_data = next(user for user in users if user['username'] == player2)
-    rating1 = player1_data['elo']
-    rating2 = player2_data['elo']
+    c.execute("SELECT elo FROM users WHERE username=?", (player1,))
+    rating1 = c.fetchone()[0]
+    c.execute("SELECT elo FROM users WHERE username=?", (player2,))
+    rating2 = c.fetchone()[0]
+    
     score1 = 1 if winner == player1 else 0
     score2 = 1 - score1
+    
     new_rating1, new_rating2 = calculate_elo(rating1, rating2, score1, score2)
-    player1_data['elo'] = new_rating1
-    player2_data['elo'] = new_rating2
-    new_match = {
-        'player1': player1,
-        'player2': player2,
-        'score1': score1,
-        'score2': score2,
-        'new_elo1': new_rating1,
-        'new_elo2': new_rating2,
-        'datetime': datetime.now().isoformat()
-    }
-    matches.append(new_match)
-    save_matches_to_github(matches)
-    save_users_to_github(users)
+    
+    c.execute("UPDATE users SET elo=? WHERE username=?", (new_rating1, player1))
+    c.execute("UPDATE users SET elo=? WHERE username=?", (new_rating2, player2))
+    c.execute("INSERT INTO matches (player1, player2, score1, score2, new_elo1, new_elo2, datetime) VALUES (?, ?, ?, ?, ?, ?, ?)",
+              (player1, player2, score1, score2, new_rating1, new_rating2, datetime.now().isoformat()))
+    conn.commit()
 
 def get_user_stats(username):
-    total_matches = len([m for m in matches if m['player1'] == username or m['player2'] == username])
-    wins = len([m for m in matches if (m['player1'] == username and m['score1'] > m['score2']) or (m['player2'] == username and m['score2'] > m['score1'])])
+    c.execute("""
+        SELECT 
+            COUNT(*) as total_matches,
+            SUM(CASE WHEN 
+                (player1 = ? AND score1 > score2) OR 
+                (player2 = ? AND score2 > score1) 
+            THEN 1 ELSE 0 END) as wins
+        FROM matches
+        WHERE player1 = ? OR player2 = ?
+    """, (username, username, username, username))
+    result = c.fetchone()
+    total_matches, wins = result
     losses = total_matches - wins
     win_rate = (wins / total_matches) * 100 if total_matches > 0 else 0
     loss_rate = 100 - win_rate
     return total_matches, win_rate, loss_rate
 
 def get_elo_history(username):
-    history = [(m['new_elo1'] if m['player1'] == username else m['new_elo2'], m['datetime'])
-               for m in matches if m['player1'] == username or m['player2'] == username]
-    df = pd.DataFrame(history, columns=['elo', 'datetime'])
+    c.execute("""
+        SELECT 
+            CASE 
+                WHEN player1 = ? THEN new_elo1
+                WHEN player2 = ? THEN new_elo2
+            END as elo,
+            datetime
+        FROM matches
+        WHERE player1 = ? OR player2 = ?
+        ORDER BY datetime DESC
+        LIMIT 10
+    """, (username, username, username, username))
+    results = c.fetchall()
+    df = pd.DataFrame(results, columns=['elo', 'datetime'])
     df['datetime'] = pd.to_datetime(df['datetime'])
     return df.sort_values('datetime')
 
@@ -137,11 +112,13 @@ def show_performance_view():
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Classement général")
-        ranking_df = pd.DataFrame(users, columns=['username', 'elo']).sort_values(by='elo', ascending=False)
+        ranking = c.execute("SELECT username, elo FROM users ORDER BY elo DESC").fetchall()
+        ranking_df = pd.DataFrame(ranking, columns=['Joueur', 'ELO'])
         st.dataframe(ranking_df)
     with col2:
         st.subheader("Statistiques du joueur")
-        selected_user = st.selectbox("Sélectionner un joueur", [user['username'] for user in users], index=0)
+        users = [user[0] for user in c.execute("SELECT username FROM users").fetchall()]
+        selected_user = st.selectbox("Sélectionner un joueur", users, index=0)
         total_matches, win_rate, loss_rate = get_user_stats(selected_user)
         st.write(f"Nombre total de matchs : {total_matches}")
         fig_pie = px.pie(values=[win_rate, loss_rate], names=['Victoires', 'Défaites'], title=f"Taux de victoire/défaite de {selected_user}")
@@ -155,16 +132,16 @@ def show_performance_view():
 
 def show_add_match_view():
     st.subheader("Ajouter un match")
-    users_list = [user['username'] for user in users]
+    users = [user[0] for user in c.execute("SELECT username FROM users").fetchall()]
     col1, col2 = st.columns(2)
     with col1:
-        player1 = st.selectbox("Joueur 1", users_list)
+        player1 = st.selectbox("Joueur 1", users)
     with col2:
         player1_result = st.radio("Résultat Joueur 1", ["Victoire", "Défaite"], horizontal=True)
     st.markdown("---")
     col3, col4 = st.columns(2)
     with col3:
-        player2 = st.selectbox("Joueur 2", [u for u in users_list if u != player1])
+        player2 = st.selectbox("Joueur 2", [u for u in users if u != player1])
     with col4:
         player2_result = "Défaite" if player1_result == "Victoire" else "Victoire"
         st.write(f"Résultat Joueur 2: {player2_result}")
