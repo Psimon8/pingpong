@@ -1,5 +1,4 @@
 import streamlit as st
-import sqlite3
 import hashlib
 import math
 import pandas as pd
@@ -39,9 +38,10 @@ def commit_to_github(file_path, content, message):
         "sha": sha
     }
     response = requests.put(url, headers=headers, data=json.dumps(data))
-    if response.status_code == 201 or response.status_code == 200:
+    if response.status_code in [201, 200]:
         return True
     else:
+        st.error(f"Failed to commit to GitHub: {response.json()}")
         return False
 
 def read_from_github(file_path):
@@ -68,24 +68,6 @@ def save_users_to_github(users):
 def save_matches_to_github(matches):
     commit_to_github(MATCHES_FILE_PATH, json.dumps(matches), "Update matches")
 
-# Existing SQLite connection
-conn = sqlite3.connect('pingpong.db')
-c = conn.cursor()
-
-# Create tables if they don't exist
-c.execute('''CREATE TABLE IF NOT EXISTS users
-             (id INTEGER PRIMARY KEY, username TEXT UNIQUE, password TEXT, elo INTEGER)''')
-c.execute('''CREATE TABLE IF NOT EXISTS matches
-             (id INTEGER PRIMARY KEY, 
-              player1 TEXT, 
-              player2 TEXT, 
-              score1 INTEGER, 
-              score2 INTEGER, 
-              new_elo1 INTEGER,
-              new_elo2 INTEGER,
-              datetime TEXT)''')
-conn.commit()
-
 def calculate_elo(rating1, rating2, score1, score2):
     expected1 = 1 / (1 + math.pow(10, (rating2 - rating1) / 400))
     expected2 = 1 / (1 + math.pow(10, (rating1 - rating2) / 400))
@@ -100,7 +82,9 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def check_credentials(username, password):
-    return any(user['username'] == username and user['password'] == hash_password(password) for user in users)
+    hashed_password = hash_password(password)
+    st.write(f"Checking credentials for {username} with hashed password {hashed_password}")
+    return any(user['username'] == username and user['password'] == hashed_password for user in users)
 
 def create_user(username, password):
     if any(user['username'] == username for user in users):
@@ -108,6 +92,7 @@ def create_user(username, password):
     new_user = {'username': username, 'password': hash_password(password), 'elo': 1500}
     users.append(new_user)
     save_users_to_github(users)
+    st.write(f"Created user {username} with hashed password {new_user['password']}")
     return True
 
 def add_match(player1, player2, winner):
