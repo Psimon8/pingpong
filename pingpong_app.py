@@ -6,6 +6,13 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime
 
+
+st.set_page_config(
+    layout="wide",
+    page_title="PrimeliPong",
+    page_icon="🏓"
+)
+
 # Connexion à la base de données
 conn = sqlite3.connect('pingpong.db')
 c = conn.cursor()
