@@ -65,8 +65,10 @@ def hash_password(password):
 
 def check_credentials(username, password):
     hashed_password = hash_password(password)
-    st.write(f"Checking credentials for {username} with hashed password {hashed_password}")
-    return any(user['username'] == username and user['password'] == hashed_password for user in users)
+    for user in users:
+        if user['username'] == username and user['password'] == hashed_password:
+            return True
+    return False
 
 def create_user(username, password):
     if any(user['username'] == username for user in users):
@@ -74,7 +76,6 @@ def create_user(username, password):
     new_user = {'username': username, 'password': hash_password(password), 'elo': 1500}
     users.append(new_user)
     save_users(users)
-    st.write(f"Created user {username} with hashed password {new_user['password']}")
     return True
 
 def add_match(player1, player2, winner):
